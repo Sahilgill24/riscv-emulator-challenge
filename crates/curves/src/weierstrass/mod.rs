@@ -180,7 +180,32 @@ impl<E: WeierstrassParameters> AffinePoint<SwCurve<E>> {
             if #[cfg(feature = "bigint-rug")] {
                 self.sw_add_rug(other)
             } else {
-                let p = biguint_to_dashu(&E::BaseField::modulus());
+                let modulus = E::BaseField::modulus();
+                // Fast path: fixed-width U256 arithmetic with a binary-GCD modular inverse
+                // (`inv_mod`) instead of dashu bignum + Fermat modpow. Covers secp256k1 and
+                // bn254 (both <= 256-bit). Larger fields (e.g. bls12_381) fall back to dashu.
+                if modulus.to_bytes_le().len() <= 32 {
+                    use alloy_primitives::U256;
+                    let p = U256::from_le_slice(&modulus.to_bytes_le());
+                    let self_x = U256::from_le_slice(&self.x.to_bytes_le());
+                    let self_y = U256::from_le_slice(&self.y.to_bytes_le());
+                    let other_x = U256::from_le_slice(&other.x.to_bytes_le());
+                    let other_y = U256::from_le_slice(&other.y.to_bytes_le());
+
+                    let slope_num = other_y.add_mod(p - self_y, p);
+                    let slope_denom = other_x.add_mod(p - self_x, p);
+                    let slope = slope_num.mul_mod(slope_denom.inv_mod(p).unwrap(), p);
+
+                    let x_3n = slope.mul_mod(slope, p).add_mod(p - self_x, p).add_mod(p - other_x, p);
+                    let y_3n = self_x.add_mod(p - x_3n, p).mul_mod(slope, p).add_mod(p - self_y, p);
+
+                    return AffinePoint::new(
+                        BigUint::from_bytes_le(x_3n.as_le_slice()),
+                        BigUint::from_bytes_le(y_3n.as_le_slice()),
+                    );
+                }
+
+                let p = biguint_to_dashu(&modulus);
                 let self_x = biguint_to_dashu(&self.x);
                 let self_y = biguint_to_dashu(&self.y);
                 let other_x = biguint_to_dashu(&other.x);
@@ -205,7 +230,31 @@ impl<E: WeierstrassParameters> AffinePoint<SwCurve<E>> {
             if #[cfg(feature = "bigint-rug")] {
                 self.sw_double_rug()
             } else {
-                let p = biguint_to_dashu(&E::BaseField::modulus());
+                let modulus = E::BaseField::modulus();
+                // Fast path: fixed-width U256 arithmetic (see `sw_add`).
+                if modulus.to_bytes_le().len() <= 32 {
+                    use alloy_primitives::U256;
+                    let p = U256::from_le_slice(&modulus.to_bytes_le());
+                    let a = U256::from_le_slice(&E::a_int().to_bytes_le());
+                    let x = U256::from_le_slice(&self.x.to_bytes_le());
+                    let y = U256::from_le_slice(&self.y.to_bytes_le());
+
+                    // slope = (3*x^2 + a) / (2*y)
+                    let slope_num = x.mul_mod(x, p).mul_mod(U256::from(3u64), p).add_mod(a, p);
+                    let slope_denom = y.mul_mod(U256::from(2u64), p);
+                    let slope = slope_num.mul_mod(slope_denom.inv_mod(p).unwrap(), p);
+
+                    // x3 = slope^2 - 2x ; y3 = slope*(x - x3) - y
+                    let x_3n = slope.mul_mod(slope, p).add_mod(p - x, p).add_mod(p - x, p);
+                    let y_3n = x.add_mod(p - x_3n, p).mul_mod(slope, p).add_mod(p - y, p);
+
+                    return AffinePoint::new(
+                        BigUint::from_bytes_le(x_3n.as_le_slice()),
+                        BigUint::from_bytes_le(y_3n.as_le_slice()),
+                    );
+                }
+
+                let p = biguint_to_dashu(&modulus);
                 let a = biguint_to_dashu(&E::a_int());
 
                 let self_x = biguint_to_dashu(&self.x);
@@ -216,7 +265,6 @@ impl<E: WeierstrassParameters> AffinePoint<SwCurve<E>> {
                 let slope_denominator = (&self_y * 2u32) % &p;
                 let slope_denom_inverse =
                     dashu_modpow(&slope_denominator, &(&p - &dashu::integer::UBig::from(2u32)), &p);
-                // let slope_denom_inverse = slope_denominator.modpow(&(&p - 2u32), &p);
                 let slope = (slope_numerator * &slope_denom_inverse) % &p;
 
                 let x_3n = (&slope * &slope + &p + &p - &self_x - &self_x) % &p;
