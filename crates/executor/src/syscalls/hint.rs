@@ -32,7 +32,9 @@ impl Syscall for HintReadSyscall {
                 ctx.rt.state.input_stream.len()
             );
         }
-        let vec = &ctx.rt.state.input_stream[ctx.rt.state.input_stream_ptr];
+        // Clone the hint bytes so we don't hold an immutable borrow of `state` across the
+        // `mem_set` calls below (which need `&mut state`).
+        let vec = ctx.rt.state.input_stream[ctx.rt.state.input_stream_ptr].clone();
         ctx.rt.state.input_stream_ptr += 1;
         assert!(
             !ctx.rt.unconstrained,
@@ -67,6 +69,9 @@ impl Syscall for HintReadSyscall {
                 .entry(ptr + i)
                 .and_modify(|_| panic!("hint read address is initialized already"))
                 .or_insert(word);
+            // Mirror the hint into the flat value store so the first read of this address returns
+            // the hint value (the flat store is the source of truth for values).
+            ctx.rt.state.mem_set(ptr + i, word);
         }
         None
     }

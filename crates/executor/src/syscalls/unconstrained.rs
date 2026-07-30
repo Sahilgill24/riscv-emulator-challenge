@@ -20,6 +20,7 @@ impl Syscall for EnterUnconstrainedSyscall {
             // record: std::mem::take(&mut ctx.rt.record),
             // op_record: std::mem::take(&mut ctx.rt.memory_accesses),
             executor_mode: ctx.rt.executor_mode,
+            registers: ctx.rt.state.registers,
         };
         ctx.rt.executor_mode = ExecutorMode::Simple;
         Some(1)
@@ -36,16 +37,13 @@ impl Syscall for ExitUnconstrainedSyscall {
             ctx.rt.state.clk = ctx.rt.unconstrained_state.clk;
             ctx.rt.state.pc = ctx.rt.unconstrained_state.pc;
             ctx.next_pc = ctx.rt.state.pc.wrapping_add(4);
-            for (addr, value) in ctx.rt.unconstrained_state.memory_diff.drain() {
-                match value {
-                    Some(value) => {
-                        ctx.rt.state.memory.insert(addr, value);
-                    }
-                    None => {
-                        ctx.rt.state.memory.remove(&addr);
-                    }
-                }
+            // Roll the flat value store back to its pre-unconstrained state.
+            let diff = std::mem::take(&mut ctx.rt.unconstrained_state.memory_diff);
+            for (addr, value) in diff {
+                ctx.rt.state.mem_set(addr, value);
             }
+            // Restore the register file from the snapshot taken when entering unconstrained mode.
+            ctx.rt.state.registers = ctx.rt.unconstrained_state.registers;
             // ctx.rt.record = std::mem::take(&mut ctx.rt.unconstrained_state.record);
             // ctx.rt.memory_accesses = std::mem::take(&mut ctx.rt.unconstrained_state.op_record);
             ctx.rt.executor_mode = ctx.rt.unconstrained_state.executor_mode;

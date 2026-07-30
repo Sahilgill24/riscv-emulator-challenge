@@ -29,6 +29,22 @@ pub struct ExecutionState {
     /// executed in this shard.
     pub clk: u32,
 
+    /// Fast register file: stores values for x0–x31 directly, bypassing the memory HashMap.
+    pub registers: [u32; 32],
+
+    /// Base address of the flat value array (`mem_values`). Addresses below this, or above the
+    /// array's covered span, fall through to `mem_overflow`.
+    pub mem_base: u32,
+
+    /// Flat, direct-indexed memory value store: `mem_values[(addr - mem_base) >> 2]`. This is the
+    /// single source of truth for memory *values* on the hot path — no hashing, no `Option`, no
+    /// per-access record. Allocated lazily (zero-backed pages) in `initialize`.
+    #[serde(skip)]
+    pub mem_values: Vec<u32>,
+
+    /// Safety net for addresses outside the dense `mem_values` span (rare: high stack / mmap).
+    pub mem_overflow: HashMap<u32, u32>,
+
     /// Uninitialized memory addresses that have a specific value they should be initialized with.
     /// `SyscallHintRead` uses this to write hint data into uninitialized memory.
     pub uninitialized_memory: HashMap<u32, u32>,
@@ -71,6 +87,35 @@ impl ExecutionState {
             public_values_stream_ptr: 0,
             proof_stream_ptr: 0,
             syscall_counts: HashMap::new(),
+            registers: [0u32; 32],
+            mem_base: 0x1_0000,
+            mem_values: Vec::new(),
+            mem_overflow: HashMap::new(),
+        }
+    }
+
+    /// Read a memory value from the flat store, falling back to the overflow map.
+    #[inline(always)]
+    #[must_use]
+    pub fn mem_get(&self, addr: u32) -> u32 {
+        let idx = (addr.wrapping_sub(self.mem_base) >> 2) as usize;
+        if idx < self.mem_values.len() {
+            // SAFETY: bounds checked above.
+            unsafe { *self.mem_values.get_unchecked(idx) }
+        } else {
+            self.mem_overflow.get(&addr).copied().unwrap_or(0)
+        }
+    }
+
+    /// Write a memory value to the flat store, falling back to the overflow map.
+    #[inline(always)]
+    pub fn mem_set(&mut self, addr: u32, value: u32) {
+        let idx = (addr.wrapping_sub(self.mem_base) >> 2) as usize;
+        if idx < self.mem_values.len() {
+            // SAFETY: bounds checked above.
+            unsafe { *self.mem_values.get_unchecked_mut(idx) = value; }
+        } else {
+            self.mem_overflow.insert(addr, value);
         }
     }
 }
@@ -85,14 +130,17 @@ pub struct ForkState {
     pub clk: u32,
     /// The original `pc` value at the fork point.
     pub pc: u32,
-    /// All memory changes since the fork point.
-    pub memory_diff: HashMap<u32, Option<MemoryRecord>>,
+    /// Original memory *values* for every address touched since the fork point (first-touch wins),
+    /// used to roll `mem_values` back on unconstrained exit.
+    pub memory_diff: HashMap<u32, u32>,
     // /// The original memory access record at the fork point.
     // pub op_record: MemoryAccessRecord,
     // /// The original execution record at the fork point.
     // pub record: ExecutionRecord,
     /// Whether `emit_events` was enabled at the fork point.
     pub executor_mode: ExecutorMode,
+    /// Snapshot of the register file at the fork point, for restoration on unconstrained exit.
+    pub registers: [u32; 32],
 }
 
 impl ExecutionState {
