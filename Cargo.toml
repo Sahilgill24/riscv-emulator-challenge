@@ -7,17 +7,16 @@ keywords = ["sp1", "succinct", "zero-knowledge", "zkvm"]
 categories = ["cryptography"]
 
 [workspace]
-members = [
-  "crates/curves",
-  "crates/executor",
-  "crates/primitives",
-  "benchmark",
-]
+members = ["crates/curves", "crates/executor", "crates/primitives", "benchmark"]
 exclude = ["examples/target"]
 resolver = "2"
 
 [profile.release]
 opt-level = 3
+codegen-units = 1
+lto = "fat"
+panic = "abort"
+
 
 [profile.bench]
 opt-level = 3
@@ -57,5 +56,10 @@ p3-bn254-fr = "0.1.4-succinct"
 
 [workspace.metadata.typos]
 # TODO: Fix in next version since CommitCommitedValuesDigest is retained since it's present in constraints.json
-default.extend-ignore-re = ["Jo-Philipp Wich", "SubEIN", "DivEIN", "CommitCommitedValuesDigest"]
+default.extend-ignore-re = [
+  "Jo-Philipp Wich",
+  "SubEIN",
+  "DivEIN",
+  "CommitCommitedValuesDigest",
+]
 default.extend-ignore-words-re = ["(?i)groth", "TRE"]

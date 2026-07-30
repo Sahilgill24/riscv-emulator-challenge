@@ -12,3 +12,4 @@ categories = { workspace = true }
 [dependencies]
 alloy-primitives = "0.8.5"
 sp1-core-executor = { workspace = true }
+tikv-jemallocator = "0.6"

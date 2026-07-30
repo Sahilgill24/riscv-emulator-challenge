@@ -1,3 +1,5 @@
+#[global_allocator]
+static GLOBAL: tikv_jemallocator::Jemalloc = tikv_jemallocator::Jemalloc;
 use std::time::Instant;
 
 use alloy_primitives::{hex::FromHex, B256};
@@ -18,7 +20,7 @@ fn main() {
     // Run the benchmark multiple times.
     for i in 0..NUM_RUNS {
         println!("Run {}/{}", i + 1, NUM_RUNS);
-        
+
         // Setup the executor.
         let mut executor = Executor::new(Program::from(program).unwrap());
         executor.write_stdin_slice(buffer);
@@ -38,16 +40,17 @@ fn main() {
         let block_hash = B256::from_slice(&bytes);
         assert_eq!(
             block_hash,
-            B256::from_hex("dab3111c08b6a9330098afd5bb0f690b20871522a1f21c924a2aabc6dbd6a5b9").unwrap()
+            B256::from_hex("dab3111c08b6a9330098afd5bb0f690b20871522a1f21c924a2aabc6dbd6a5b9")
+                .unwrap()
         );
-        
+
         let mhz = (executor.state.global_clk as f64 / elapsed) / 1_000_000.0;
-        
+
         println!("  block_hash={block_hash}");
         println!("  cycles: {}", executor.state.global_clk);
         println!("  elapsed: {:.4} seconds", elapsed);
         println!("  mhz: {:.2}", mhz);
-        
+
         // Accumulate totals.
         total_elapsed += elapsed;
         total_mhz += mhz;
